@@ -16,7 +16,7 @@ using CvSize = OpenCvSharp.Size;
 
 namespace YoloDemo
 {
-    public partial class FrmMain : Form
+    public partial class Form1 : Form
     {
         private const int DefaultCameraIndex = 0;
         private const int CameraWidth = 640;
@@ -69,14 +69,13 @@ namespace YoloDemo
         private YoloPoseDetector _detector;
         private CancellationTokenSource _captureCts;
         private Task _captureTask;
-        private SkeletonMonitorForm _skeletonMonitorForm;
         private bool _closing;
         private double _smoothFps;
         private int _uiFramePending;
         private readonly Stopwatch _dataPrintWatch = Stopwatch.StartNew();
         private long _dataSequence;
 
-        public FrmMain()
+        public Form1()
         {
             InitializeComponent();
             this.FormBorderStyle = FormBorderStyle.None;
@@ -122,8 +121,6 @@ namespace YoloDemo
 
         private void Form1_Shown(object sender, EventArgs e)
         {
-            OpenSkeletonMonitor();
-
             if (_detector != null)
             {
                 StartCapture(DefaultCameraIndex);
@@ -214,7 +211,6 @@ namespace YoloDemo
                     double instantFps = 1000.0 / Math.Max(1.0, frameWatch.Elapsed.TotalMilliseconds);
                     _smoothFps = _smoothFps <= 0 ? instantFps : _smoothFps * 0.85 + instantFps * 0.15;
                     PrintDetectionData(detections, _smoothFps);
-                    PostSkeletonData(detections, _smoothFps, previewFrame.Width, previewFrame.Height);
                     DrawFps(previewFrame, _smoothFps);
 
                     Bitmap bitmap = MatToBitmap(previewFrame);
@@ -491,72 +487,6 @@ namespace YoloDemo
             }
         }
 
-        private void PostSkeletonData(IList<PoseDetection> detections, double fps, int sourceWidth, int sourceHeight)
-        {
-            SkeletonMonitorForm monitor = _skeletonMonitorForm;
-            if (monitor == null || monitor.IsDisposed)
-            {
-                return;
-            }
-
-            monitor.UpdateDetections(detections, fps, sourceWidth, sourceHeight);
-        }
-
-        private void OpenSkeletonMonitor()
-        {
-            if (_skeletonMonitorForm != null && !_skeletonMonitorForm.IsDisposed)
-            {
-                _skeletonMonitorForm.Show(this);
-                return;
-            }
-
-            _skeletonMonitorForm = new SkeletonMonitorForm();
-            _skeletonMonitorForm.FormClosed += SkeletonMonitorForm_FormClosed;
-            PlaceSkeletonMonitor(_skeletonMonitorForm);
-            _skeletonMonitorForm.Show(this);
-        }
-
-        private void SkeletonMonitorForm_FormClosed(object sender, FormClosedEventArgs e)
-        {
-            if (ReferenceEquals(sender, _skeletonMonitorForm))
-            {
-                _skeletonMonitorForm = null;
-            }
-        }
-
-        private void PlaceSkeletonMonitor(Form monitor)
-        {
-            Rectangle workArea = Screen.FromControl(this).WorkingArea;
-            int gap = 12;
-            int x = Right + gap;
-            if (x + monitor.Width > workArea.Right)
-            {
-                x = Left - monitor.Width - gap;
-            }
-
-            if (x < workArea.Left)
-            {
-                x = workArea.Left + Math.Max(0, (workArea.Width - monitor.Width) / 2);
-            }
-
-            int y = Math.Min(Math.Max(Top, workArea.Top), Math.Max(workArea.Top, workArea.Bottom - monitor.Height));
-            monitor.Location = new System.Drawing.Point(x, y);
-        }
-
-        private void CloseSkeletonMonitor()
-        {
-            SkeletonMonitorForm monitor = _skeletonMonitorForm;
-            _skeletonMonitorForm = null;
-            if (monitor == null || monitor.IsDisposed)
-            {
-                return;
-            }
-
-            monitor.FormClosed -= SkeletonMonitorForm_FormClosed;
-            monitor.Close();
-            monitor.Dispose();
-        }
-
         private void PrintDetectionData(IList<PoseDetection> detections, double fps)
         {
             if (_dataPrintWatch.ElapsedMilliseconds < DataPrintIntervalMs)
@@ -603,7 +533,7 @@ namespace YoloDemo
             {
             }
         }
-            
+
         private void PostError(string message)
         {
             if (_closing || IsDisposed)
@@ -634,7 +564,6 @@ namespace YoloDemo
         {
             _closing = true;
             StopCapture(true);
-            CloseSkeletonMonitor();
             if (_detector != null)
             {
                 _detector.Dispose();
