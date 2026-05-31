@@ -1,6 +1,6 @@
 namespace YoloDemo
 {
-    partial class Form1
+    partial class FrmMain
     {
         private System.ComponentModel.IContainer components = null;
 
