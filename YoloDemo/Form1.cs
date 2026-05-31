@@ -26,13 +26,6 @@ namespace YoloDemo
         private const float IouThreshold = 0.45f;
         private const int DataPrintIntervalMs = 1000;
 
-        private static readonly int[,] SkeletonPairs =
-        {
-            {15, 13}, {13, 11}, {16, 14}, {14, 12}, {11, 12}, {5, 11}, {6, 12},
-            {5, 6}, {5, 7}, {6, 8}, {7, 9}, {8, 10}, {1, 2}, {0, 1},
-            {0, 2}, {1, 3}, {2, 4}, {3, 5}, {4, 6}
-        };
-
         private static readonly Scalar BoxColor = new Scalar(255, 42, 4);
         private static readonly Scalar TextColor = new Scalar(255, 255, 255);
         private static readonly Scalar FpsColor = new Scalar(86, 255, 194);
@@ -48,27 +41,12 @@ namespace YoloDemo
             new Scalar(51, 255, 51), new Scalar(0, 255, 0), new Scalar(0, 0, 255),
             new Scalar(255, 0, 0), new Scalar(255, 255, 255)
         };
-        private static readonly int[] LimbColorIndexes =
-        {
-            9, 9, 9, 9, 7, 7, 7, 0, 0, 0, 0, 0, 16, 16, 16, 16, 16, 16, 16
-        };
-        private static readonly int[] KeypointColorIndexes =
-        {
-            16, 16, 16, 16, 16, 0, 0, 0, 0, 0, 0, 9, 9, 9, 9, 9, 9
-        };
-        private static readonly string[] KeypointNames =
-        {
-            "nose", "left_eye", "right_eye", "left_ear", "right_ear",
-            "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
-            "left_wrist", "right_wrist", "left_hip", "right_hip",
-            "left_knee", "right_knee", "left_ankle", "right_ankle"
-        };
-
         private readonly object _stopLock = new object();
         private readonly string _modelPath;
         private YoloPoseDetector _detector;
         private CancellationTokenSource _captureCts;
         private Task _captureTask;
+        private SkeletonMonitorForm _skeletonMonitorForm;
         private bool _closing;
         private double _smoothFps;
         private int _uiFramePending;
@@ -78,7 +56,6 @@ namespace YoloDemo
         public Form1()
         {
             InitializeComponent();
-            this.FormBorderStyle = FormBorderStyle.None;
             _modelPath = ResolveModelPath();
             LoadDetector();
         }
@@ -121,6 +98,8 @@ namespace YoloDemo
 
         private void Form1_Shown(object sender, EventArgs e)
         {
+            OpenSkeletonMonitor();
+
             if (_detector != null)
             {
                 StartCapture(DefaultCameraIndex);
@@ -211,6 +190,7 @@ namespace YoloDemo
                     double instantFps = 1000.0 / Math.Max(1.0, frameWatch.Elapsed.TotalMilliseconds);
                     _smoothFps = _smoothFps <= 0 ? instantFps : _smoothFps * 0.85 + instantFps * 0.15;
                     PrintDetectionData(detections, _smoothFps);
+                    PostSkeletonData(detections, _smoothFps, previewFrame.Width, previewFrame.Height);
                     DrawFps(previewFrame, _smoothFps);
 
                     Bitmap bitmap = MatToBitmap(previewFrame);
@@ -308,22 +288,23 @@ namespace YoloDemo
             for (int i = 0; i < keypoints.Length; i++)
             {
                 Keypoint keypoint = keypoints[i];
-                if (keypoint.Confidence < 0.25f || IsInvalidKeypoint(frame, keypoint))
+                if (keypoint.Confidence < PoseMetadata.VisibleKeypointConfidence || IsInvalidKeypoint(frame, keypoint))
                 {
                     continue;
                 }
 
-                    CvPoint point = ToCvPoint(keypoint);
-                    Cv2.Circle(frame, point, radius + 1, ShadowColor, -1, LineTypes.AntiAlias);
-                    Cv2.Circle(frame, point, radius, GetKeypointColor(i), -1, LineTypes.AntiAlias);
-                    Cv2.Circle(frame, point, Math.Max(1, radius / 2), JointCenterColor, -1, LineTypes.AntiAlias);
+                CvPoint point = ToCvPoint(keypoint);
+                Cv2.Circle(frame, point, radius + 1, ShadowColor, -1, LineTypes.AntiAlias);
+                Cv2.Circle(frame, point, radius, GetKeypointColor(i), -1, LineTypes.AntiAlias);
+                Cv2.Circle(frame, point, Math.Max(1, radius / 2), JointCenterColor, -1, LineTypes.AntiAlias);
             }
 
             int lineThickness = Math.Max(1, (int)Math.Ceiling(stroke / 2.0));
-            for (int i = 0; i < SkeletonPairs.GetLength(0); i++)
+            int[,] pairs = PoseMetadata.SkeletonPairs;
+            for (int i = 0; i < pairs.GetLength(0); i++)
             {
-                int first = SkeletonPairs[i, 0];
-                int second = SkeletonPairs[i, 1];
+                int first = pairs[i, 0];
+                int second = pairs[i, 1];
                 if (first >= keypoints.Length || second >= keypoints.Length)
                 {
                     continue;
@@ -331,7 +312,7 @@ namespace YoloDemo
 
                 Keypoint p1 = keypoints[first];
                 Keypoint p2 = keypoints[second];
-                if (p1.Confidence >= 0.25f && p2.Confidence >= 0.25f &&
+                if (p1.Confidence >= PoseMetadata.VisibleKeypointConfidence && p2.Confidence >= PoseMetadata.VisibleKeypointConfidence &&
                     !IsInvalidKeypoint(frame, p1) && !IsInvalidKeypoint(frame, p2))
                 {
                     CvPoint pos1 = ToCvPoint(p1);
@@ -351,12 +332,14 @@ namespace YoloDemo
 
         private static Scalar GetLimbColor(int index)
         {
-            return PosePalette[LimbColorIndexes[index % LimbColorIndexes.Length]];
+            int[] indexes = PoseMetadata.LimbColorIndexes;
+            return PosePalette[indexes[index % indexes.Length]];
         }
 
         private static Scalar GetKeypointColor(int index)
         {
-            return PosePalette[KeypointColorIndexes[index % KeypointColorIndexes.Length]];
+            int[] indexes = PoseMetadata.KeypointColorIndexes;
+            return PosePalette[indexes[index % indexes.Length]];
         }
 
         private static void DrawFps(Mat frame, double fps)
@@ -480,11 +463,91 @@ namespace YoloDemo
                     }
                 }));
             }
+            catch (ObjectDisposedException)
+            {
+                Interlocked.Exchange(ref _uiFramePending, 0);
+                bitmap.Dispose();
+            }
             catch (InvalidOperationException)
             {
                 Interlocked.Exchange(ref _uiFramePending, 0);
                 bitmap.Dispose();
             }
+        }
+
+        private void PostSkeletonData(IList<PoseDetection> detections, double fps, int sourceWidth, int sourceHeight)
+        {
+            SkeletonMonitorForm monitor = _skeletonMonitorForm;
+            if (monitor == null || monitor.IsDisposed)
+            {
+                return;
+            }
+
+            monitor.UpdateDetections(detections, fps, sourceWidth, sourceHeight);
+        }
+
+        private void OpenSkeletonMonitor()
+        {
+            if (_skeletonMonitorForm != null && !_skeletonMonitorForm.IsDisposed)
+            {
+                _skeletonMonitorForm.Show(this);
+                return;
+            }
+
+            _skeletonMonitorForm = new SkeletonMonitorForm();
+            _skeletonMonitorForm.FormClosed += SkeletonMonitorForm_FormClosed;
+            PlaceSkeletonMonitor(_skeletonMonitorForm);
+            _skeletonMonitorForm.Show(this);
+        }
+
+        private void SkeletonMonitorForm_FormClosed(object sender, FormClosedEventArgs e)
+        {
+            if (ReferenceEquals(sender, _skeletonMonitorForm))
+            {
+                _skeletonMonitorForm = null;
+            }
+        }
+
+        private void PlaceSkeletonMonitor(Form monitor)
+        {
+            Rectangle workArea = Screen.FromControl(this).WorkingArea;
+            int maxWidth = Math.Max(640, workArea.Width - 40);
+            int maxHeight = Math.Max(520, workArea.Height - 40);
+            if (monitor.Width > maxWidth || monitor.Height > maxHeight)
+            {
+                monitor.Size = new System.Drawing.Size(
+                    Math.Min(monitor.Width, maxWidth),
+                    Math.Min(monitor.Height, maxHeight));
+            }
+
+            int gap = 12;
+            int x = Right + gap;
+            if (x + monitor.Width > workArea.Right)
+            {
+                x = Left - monitor.Width - gap;
+            }
+
+            if (x < workArea.Left)
+            {
+                x = workArea.Left + Math.Max(0, (workArea.Width - monitor.Width) / 2);
+            }
+
+            int y = Math.Min(Math.Max(Top, workArea.Top), Math.Max(workArea.Top, workArea.Bottom - monitor.Height));
+            monitor.Location = new System.Drawing.Point(x, y);
+        }
+
+        private void CloseSkeletonMonitor()
+        {
+            SkeletonMonitorForm monitor = _skeletonMonitorForm;
+            _skeletonMonitorForm = null;
+            if (monitor == null || monitor.IsDisposed)
+            {
+                return;
+            }
+
+            monitor.FormClosed -= SkeletonMonitorForm_FormClosed;
+            monitor.Close();
+            monitor.Dispose();
         }
 
         private void PrintDetectionData(IList<PoseDetection> detections, double fps)
@@ -517,7 +580,7 @@ namespace YoloDemo
                     Keypoint[] keypoints = detection.Keypoints ?? new Keypoint[0];
                     for (int k = 0; k < keypoints.Length; k++)
                     {
-                        string name = k < KeypointNames.Length ? KeypointNames[k] : "kp" + k;
+                        string name = k < PoseMetadata.KeypointNames.Length ? PoseMetadata.KeypointNames[k] : "kp" + k;
                         Keypoint keypoint = keypoints[k];
                         builder.AppendFormat(" {0}=({1:0.0},{2:0.0},{3:0.00})", name, keypoint.X, keypoint.Y, keypoint.Confidence);
                     }
@@ -564,6 +627,7 @@ namespace YoloDemo
         {
             _closing = true;
             StopCapture(true);
+            CloseSkeletonMonitor();
             if (_detector != null)
             {
                 _detector.Dispose();

@@ -357,7 +357,10 @@ namespace YoloDemo
 
         private static bool Has(Keypoint[] keypoints, int index)
         {
-            return keypoints != null && index >= 0 && index < keypoints.Length && keypoints[index].Confidence >= 0.35f;
+            return keypoints != null &&
+                index >= 0 &&
+                index < keypoints.Length &&
+                keypoints[index].Confidence >= PoseMetadata.ReliableKeypointConfidence;
         }
 
         private static bool LooksNormalized(float a, float b, float c, float d)
